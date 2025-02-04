@@ -47,6 +47,27 @@ var WildRydes = window.WildRydes || {};
         }
     });
 
+    /*
+     * Compute SECRET_HASH for Cognito
+     */
+    function calculateSecretHash(username, clientId, clientSecret) {
+        var crypto = window.crypto || window.msCrypto; // For IE11
+        var hmac = crypto.subtle || crypto.webkitSubtle;
+        var encoder = new TextEncoder();
+        var data = encoder.encode(username + clientId);
+        var key = encoder.encode(clientSecret);
+
+        return hmac.importKey(
+            { name: "HMAC", hash: { name: "SHA-256" }, length: 256 },
+            key,
+            false,
+            ["sign"]
+        ).then((cryptoKey) =>
+            hmac.sign("HMAC", cryptoKey, data)
+        ).then((signature) => 
+            btoa(String.fromCharCode(...new Uint8Array(signature)))
+        );
+    }
 
     /*
      * Cognito User Pool functions
@@ -59,15 +80,22 @@ var WildRydes = window.WildRydes || {};
         };
         var attributeEmail = new AmazonCognitoIdentity.CognitoUserAttribute(dataEmail);
 
-        userPool.signUp(toUsername(email), password, [attributeEmail], null,
-            function signUpCallback(err, result) {
-                if (!err) {
-                    onSuccess(result);
-                } else {
-                    onFailure(err);
-                }
-            }
-        );
+        calculateSecretHash(email, _config.cognito.userPoolClientId, _config.cognito.clientSecret)
+            .then(secretHash => {
+                userPool.signUp(
+                    toUsername(email), 
+                    password, 
+                    [attributeEmail], 
+                    { SecretHash: secretHash },
+                    function signUpCallback(err, result) {
+                        if (!err) {
+                            onSuccess(result);
+                        } else {
+                            onFailure(err);
+                        }
+                    }
+                );
+            });
     }
 
     function signin(email, password, onSuccess, onFailure) {
